@@ -8,12 +8,9 @@ import (
 	// "flag"
 	"fmt"
 	"log"
-	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-
-	// "strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -24,11 +21,21 @@ const (
 	Retry
 )
 
+type MonitoringStats struct {
+	RequestsServed   uint64
+	FailedRequests   uint64
+	ActiveConnection int64
+
+	TotalLatency time.Duration
+	mux          sync.Mutex
+}
+
 type Backend struct {
 	URL          *url.URL
 	Alive        bool
 	mux          sync.RWMutex
 	reverseproxy *httputil.ReverseProxy
+	Stats        MonitoringStats
 }
 
 type ServerPool struct {
@@ -102,14 +109,37 @@ func (b *Backend) IsAlive() (alive bool) {
 }
 
 func isBackendAlive(u *url.URL) bool {
-	duration := 2 * time.Second
-	conn, err := net.DialTimeout("tcp", u.Host, duration)
+	client := http.Client{
+		Timeout: 2 * time.Second,
+	}
+	healthURL := *u
+	healthURL.Path = "/health"
+	resp, err := client.Get(healthURL.String())
+
 	if err != nil {
 		log.Println("Site Unreachable err: ", err)
 		return false
 	}
-	_ = conn.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return false
+	}
+	defer resp.Body.Close()
 	return true
+}
+
+func (b *Backend) AverageLatency() time.Duration {
+	requests := atomic.LoadUint64(&b.Stats.RequestsServed)
+
+	if requests == 0 {
+		return 0
+	}
+
+	b.Stats.mux.Lock()
+	total := b.Stats.TotalLatency
+	b.Stats.mux.Unlock()
+
+	return total / time.Duration(requests)
 }
 
 func (s *ServerPool) HealthCheck() {
@@ -121,11 +151,18 @@ func (s *ServerPool) HealthCheck() {
 			status = "down"
 		}
 		log.Printf("%s [%s]\n", b.URL, status)
+		avgLatency := b.AverageLatency()
+		log.Printf(
+			"Requests=%d Failed=%d Active=%d AvgLatency=%v\n",
+			atomic.LoadUint64(&b.Stats.RequestsServed),
+			atomic.LoadUint64(&b.Stats.FailedRequests),
+			atomic.LoadInt64(&b.Stats.ActiveConnection),
+			avgLatency)
 	}
 }
 
-func healthCheck() {
-	t := time.NewTicker(time.Second * 20)
+func healthCheck(healthCheckInterval time.Duration) {
+	t := time.NewTicker(healthCheckInterval)
 	for {
 		select {
 		case <-t.C:
@@ -148,7 +185,18 @@ func lb(w http.ResponseWriter, r *http.Request) {
 	nextPeer := serverPool.GetNextPeer()
 
 	if nextPeer != nil {
+		// increasing request served
+		atomic.AddUint64(&nextPeer.Stats.RequestsServed, 1)
+		// increasing active connection
+		atomic.AddInt64(&nextPeer.Stats.ActiveConnection, 1)
+		// defer pushes the code into the stack and executes at the last
+		defer atomic.AddInt64(&nextPeer.Stats.ActiveConnection, -1)
+		start := time.Now()
 		nextPeer.reverseproxy.ServeHTTP(w, r)
+		latency := time.Since(start)
+		nextPeer.Stats.mux.Lock()
+		nextPeer.Stats.TotalLatency = nextPeer.Stats.TotalLatency + latency
+		nextPeer.Stats.mux.Unlock()
 		return
 	}
 	http.Error(w, "Service is not available at the moment", http.StatusServiceUnavailable)
@@ -160,9 +208,11 @@ var serverPool ServerPool
 func main() {
 	var serverList string
 	var port int
+	var healthInterval time.Duration
 
 	flag.StringVar(&serverList, "backends", "", "Load Balanced Backends, use comma to seperate")
 	flag.IntVar(&port, "Port", 3030, "Enter the port number,default: 3030")
+	flag.DurationVar(&healthInterval, "health-check-interval", 20*time.Second, "Enter the time interval to check Backend Health")
 	flag.Parse()
 
 	if len(serverList) == 0 {
@@ -175,7 +225,14 @@ func main() {
 			log.Fatal(err)
 		}
 		rp := httputil.NewSingleHostReverseProxy(serverURL)
+		backend := &Backend{
+			URL:          serverURL,
+			Alive:        true,
+			reverseproxy: rp,
+		}
+
 		rp.ErrorHandler = func(writer http.ResponseWriter, request *http.Request, e error) {
+			atomic.AddUint64(&backend.Stats.FailedRequests, 1)
 			log.Printf("[%s] %s\n", serverURL.Host, e.Error())
 			retries := GetRetryFromContext(request)
 			if retries < 3 {
@@ -195,11 +252,7 @@ func main() {
 			lb(writer, request.WithContext(ctx))
 		}
 
-		serverPool.AddBackend(&Backend{
-			URL:          serverURL,
-			Alive:        true,
-			reverseproxy: rp,
-		})
+		serverPool.AddBackend(backend)
 
 		log.Printf("Configured Server: %s\n", port)
 	}
@@ -209,7 +262,7 @@ func main() {
 		Handler: http.HandlerFunc(lb),
 	}
 
-	go healthCheck()
+	go healthCheck(healthInterval)
 
 	log.Printf("Load Balance Stored at :%d\n", port)
 	if err := server.ListenAndServe(); err != nil {
