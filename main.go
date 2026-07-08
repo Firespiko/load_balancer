@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"os"
 	"strings"
 
 	// "flag"
@@ -14,6 +15,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -32,6 +35,7 @@ type MonitoringStats struct {
 
 type Backend struct {
 	URL          *url.URL
+	Weight       int
 	Alive        bool
 	mux          sync.RWMutex
 	reverseproxy *httputil.ReverseProxy
@@ -39,8 +43,22 @@ type Backend struct {
 }
 
 type ServerPool struct {
-	backends []*Backend
-	current  uint64
+	backends         []*Backend
+	weightedBackends []*Backend
+	current          uint64
+}
+
+type BackendConfig struct {
+	Url        string `yaml:"url"`
+	Weight     uint64 `yaml:"weight"`
+	HealthPath string `yaml:"health_path"`
+}
+
+type Config struct {
+	Port           int64           `yaml:"port"`
+	HealthInterval time.Duration   `yaml:"health_interval"`
+	Algorithm      string          `yaml:"algorithm"`
+	Backends       []BackendConfig `yaml:"backends"`
 }
 
 func (s *ServerPool) AddBackend(backend *Backend) {
@@ -106,6 +124,19 @@ func (b *Backend) IsAlive() (alive bool) {
 	alive = b.Alive
 	b.mux.RUnlock()
 	return alive
+}
+
+func LoadConfig(path string) (*Config, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		log.Fatal(err)
+	}
+	var config Config
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return nil, err
+	}
+	fmt.Printf("%+v\n", config)
+	return &config, err
 }
 
 func isBackendAlive(u *url.URL) bool {
@@ -203,58 +234,106 @@ func lb(w http.ResponseWriter, r *http.Request) {
 
 }
 
+func addBackend(serverURL *url.URL) {
+	rp := httputil.NewSingleHostReverseProxy(serverURL)
+
+	backend := &Backend{
+		URL:          serverURL,
+		Alive:        true,
+		reverseproxy: rp,
+	}
+
+	rp.ErrorHandler = func(writer http.ResponseWriter, request *http.Request, e error) {
+		atomic.AddUint64(&backend.Stats.FailedRequests, 1)
+
+		log.Printf("[%s] %s\n", serverURL.Host, e.Error())
+
+		retries := GetRetryFromContext(request)
+		if retries < 3 {
+			select {
+			case <-time.After(10 * time.Millisecond):
+				ctx := context.WithValue(request.Context(), Retry, retries+1)
+				rp.ServeHTTP(writer, request.WithContext(ctx))
+			}
+			return
+		}
+
+		serverPool.MarkBackendStatus(serverURL, false)
+
+		attempts := GetAttemptsFromContext(request)
+		log.Printf("%s(%s) Attempting Retry %d\n",
+			request.RemoteAddr,
+			request.URL.Path,
+			attempts,
+		)
+
+		ctx := context.WithValue(request.Context(), Attempts, attempts+1)
+		lb(writer, request.WithContext(ctx))
+	}
+
+	serverPool.AddBackend(backend)
+
+	log.Printf("Configured server: %s\n", serverURL)
+}
+
 var serverPool ServerPool
 
 func main() {
+	var configPath string
 	var serverList string
 	var port int
 	var healthInterval time.Duration
 
-	flag.StringVar(&serverList, "backends", "", "Load Balanced Backends, use comma to seperate")
-	flag.IntVar(&port, "Port", 3030, "Enter the port number,default: 3030")
-	flag.DurationVar(&healthInterval, "health-check-interval", 20*time.Second, "Enter the time interval to check Backend Health")
+	flag.StringVar(&configPath, "config", "", "Path to config file")
+
+	flag.StringVar(&serverList, "backends", "", "Load balanced backends")
+	flag.IntVar(&port, "port", 3030, "Port to serve")
+	flag.DurationVar(
+		&healthInterval,
+		"health-check-interval",
+		20*time.Second,
+		"Backend health check interval",
+	)
+
 	flag.Parse()
 
-	if len(serverList) == 0 {
-		log.Fatal("Please provide one or more backends to balance")
-	}
-	tokens := strings.Split(serverList, ",")
-	for _, tok := range tokens {
-		serverURL, err := url.Parse(tok)
+	if configPath != "" {
+
+		config, err := LoadConfig(configPath)
 		if err != nil {
 			log.Fatal(err)
 		}
-		rp := httputil.NewSingleHostReverseProxy(serverURL)
-		backend := &Backend{
-			URL:          serverURL,
-			Alive:        true,
-			reverseproxy: rp,
-		}
 
-		rp.ErrorHandler = func(writer http.ResponseWriter, request *http.Request, e error) {
-			atomic.AddUint64(&backend.Stats.FailedRequests, 1)
-			log.Printf("[%s] %s\n", serverURL.Host, e.Error())
-			retries := GetRetryFromContext(request)
-			if retries < 3 {
-				select {
-				case <-time.After(10 * time.Millisecond):
-					ctx := context.WithValue(request.Context(), Retry, retries+1)
-					rp.ServeHTTP(writer, request.WithContext(ctx))
-				}
-				return
+		port = int(config.Port)
+		healthInterval = config.HealthInterval
+
+		for _, backendCfg := range config.Backends {
+
+			serverURL, err := url.Parse(backendCfg.Url)
+			if err != nil {
+				log.Fatal(err)
 			}
 
-			serverPool.MarkBackendStatus(serverURL, false)
-
-			attempts := GetAttemptsFromContext(request)
-			log.Printf("%s(%s) Attempting Retry %d \n", request.RemoteAddr, request.URL.Path, attempts)
-			ctx := context.WithValue(request.Context(), Attempts, attempts+1)
-			lb(writer, request.WithContext(ctx))
+			addBackend(serverURL)
 		}
 
-		serverPool.AddBackend(backend)
+	} else {
 
-		log.Printf("Configured Server: %s\n", port)
+		if len(serverList) == 0 {
+			log.Fatal("Please provide one or more backends")
+		}
+
+		tokens := strings.Split(serverList, ",")
+
+		for _, tok := range tokens {
+
+			serverURL, err := url.Parse(tok)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			addBackend(serverURL)
+		}
 	}
 
 	server := http.Server{
@@ -264,9 +343,9 @@ func main() {
 
 	go healthCheck(healthInterval)
 
-	log.Printf("Load Balance Stored at :%d\n", port)
+	log.Printf("Load Balancer started at :%d\n", port)
+
 	if err := server.ListenAndServe(); err != nil {
 		log.Fatal(err)
 	}
-
 }

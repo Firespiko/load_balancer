@@ -1,0 +1,15 @@
+port: 3030
+
+health_interval: 20s
+
+algorithm: round_robin
+
+backends:
+  - url: https://localhost:8001
+    weight: 2
+    health_path: /health
+
+
+  - url: https://localhost:8002
+    weight: 3 
+    health_path: /health
