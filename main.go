@@ -50,7 +50,7 @@ type ServerPool struct {
 
 type BackendConfig struct {
 	Url        string `yaml:"url"`
-	Weight     uint64 `yaml:"weight"`
+	Weight     int    `yaml:"weight"`
 	HealthPath string `yaml:"health_path"`
 }
 
@@ -63,6 +63,10 @@ type Config struct {
 
 func (s *ServerPool) AddBackend(backend *Backend) {
 	s.backends = append(s.backends, backend)
+
+	for i := 0; i < backend.Weight; i++ {
+		s.weightedBackends = append(s.weightedBackends, backend)
+	}
 }
 
 func (s *ServerPool) MarkBackendStatus(backendUrl *url.URL, alive bool) {
@@ -76,22 +80,29 @@ func (s *ServerPool) MarkBackendStatus(backendUrl *url.URL, alive bool) {
 }
 
 func (s *ServerPool) NextIndex() int {
-	return int(atomic.AddUint64(&s.current, uint64(1)) % uint64(len(s.backends)))
+	if len(s.weightedBackends) == 0 {
+		return -1
+	}
+
+	return int(atomic.AddUint64(&s.current, uint64(1)) % uint64(len(s.weightedBackends)))
 }
 
 func (s *ServerPool) GetNextPeer() *Backend {
 	next := s.NextIndex()
-	l := len(s.backends) + next
+	if next == -1 {
+		return nil
+	}
+	l := len(s.weightedBackends) + next
 	// this essentially takes the current index lets say 1 out of 4 and adds the total length 4 which makes it 5 so we have to do 4 iterations
 
 	for i := next; i < l; i++ {
-		idx := i % (len(s.backends))
+		idx := i % (len(s.weightedBackends))
 		// the above idx stores the current backend it is modded since if we start from 2 out of 4 and complete till 4 and i becomes 5 then we need it to point to first backend
-		if s.backends[idx].IsAlive() {
+		if s.weightedBackends[idx].IsAlive() {
 			if i != next {
 				atomic.StoreUint64(&s.current, uint64(idx))
 			}
-			return s.backends[idx]
+			return s.weightedBackends[idx]
 		}
 	}
 
@@ -136,7 +147,7 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, err
 	}
 	fmt.Printf("%+v\n", config)
-	return &config, err
+	return &config, nil
 }
 
 func isBackendAlive(u *url.URL) bool {
@@ -234,11 +245,19 @@ func lb(w http.ResponseWriter, r *http.Request) {
 
 }
 
-func addBackend(serverURL *url.URL) {
+func addBackend(cfg BackendConfig) {
+	serverURL, err := url.Parse(cfg.Url)
+	if err != nil {
+		log.Fatal(err)
+	}
 	rp := httputil.NewSingleHostReverseProxy(serverURL)
+	if cfg.Weight <= 0 {
+		cfg.Weight = 1
+	}
 
 	backend := &Backend{
 		URL:          serverURL,
+		Weight:       cfg.Weight,
 		Alive:        true,
 		reverseproxy: rp,
 	}
@@ -309,12 +328,7 @@ func main() {
 
 		for _, backendCfg := range config.Backends {
 
-			serverURL, err := url.Parse(backendCfg.Url)
-			if err != nil {
-				log.Fatal(err)
-			}
-
-			addBackend(serverURL)
+			addBackend(backendCfg)
 		}
 
 	} else {
@@ -327,12 +341,10 @@ func main() {
 
 		for _, tok := range tokens {
 
-			serverURL, err := url.Parse(tok)
-			if err != nil {
-				log.Fatal(err)
-			}
-
-			addBackend(serverURL)
+			addBackend(BackendConfig{
+				Url:    tok,
+				Weight: 1,
+			})
 		}
 	}
 
