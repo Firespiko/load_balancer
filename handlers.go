@@ -29,7 +29,7 @@ func lb(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	nextPeer := serverPool.GetNextPeer()
+	nextPeer := serverPool.GetNextPeer(r)
 
 	if nextPeer != nil {
 		// increasing request served

@@ -16,9 +16,10 @@ func main() {
 	var serverList string
 	var port int
 	var healthInterval time.Duration
+	var algorithm string
 
 	flag.StringVar(&configPath, "config", "", "Path to config file")
-
+	flag.StringVar(&algorithm, "algorithm", "round_robin", "Choose the algorithm")
 	flag.StringVar(&serverList, "backends", "", "Load balanced backends")
 	flag.IntVar(&port, "port", 3030, "Port to serve")
 	flag.DurationVar(
@@ -39,6 +40,7 @@ func main() {
 
 		port = int(config.Port)
 		healthInterval = config.HealthInterval
+		serverPool.AlgorithmAssigner(config.Algorithm)
 
 		for _, backendCfg := range config.Backends {
 
@@ -52,6 +54,7 @@ func main() {
 		}
 
 		tokens := strings.Split(serverList, ",")
+		serverPool.AlgorithmAssigner(algorithm)
 
 		for _, tok := range tokens {
 
@@ -60,6 +63,7 @@ func main() {
 				Weight: 1,
 			})
 		}
+
 	}
 
 	server := http.Server{

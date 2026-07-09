@@ -10,6 +10,7 @@ type ServerPool struct {
 	backends         []*Backend
 	weightedBackends []*Backend
 	current          uint64
+	Scheduler        Scheduler
 }
 
 func (s *ServerPool) AddBackend(backend *Backend) {
@@ -47,4 +48,28 @@ func (s *ServerPool) HealthCheck() {
 			atomic.LoadInt64(&b.Stats.ActiveConnection),
 			avgLatency)
 	}
+}
+
+func (s *ServerPool) AlgorithmAssigner(algorithm string) {
+	switch algorithm {
+
+	case string(RoundRobinAlgo):
+		s.Scheduler = RoundRobinScheduler
+
+	case string(WeightedRoundRobinAlgo):
+		s.Scheduler = WeightedRoundRobinScheduler
+
+	case string(LeastConnectionsAlgo):
+		s.Scheduler = LeastConnectionsScheduler
+
+	case string(RandomWeightAlgo):
+		s.Scheduler = RandomWeightedScheduler
+
+	case string(IPHashAlgo):
+		s.Scheduler = IPHashScheduler
+
+	default:
+		s.Scheduler = WeightedRoundRobinScheduler
+	}
+
 }
