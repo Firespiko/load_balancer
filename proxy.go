@@ -29,6 +29,7 @@ func addBackend(cfg BackendConfig) {
 
 	rp.ErrorHandler = func(writer http.ResponseWriter, request *http.Request, e error) {
 		atomic.AddUint64(&backend.Stats.FailedRequests, 1)
+		FailedRequests.Inc()
 
 		log.Printf("[%s] %s\n", serverURL.Host, e.Error())
 

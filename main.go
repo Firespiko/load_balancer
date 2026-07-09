@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 var serverPool ServerPool
@@ -65,10 +67,13 @@ func main() {
 		}
 
 	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", lb)
+	mux.Handle("/metrics", promhttp.Handler())
 
 	server := http.Server{
 		Addr:    fmt.Sprintf(":%d", port),
-		Handler: http.HandlerFunc(lb),
+		Handler: mux,
 	}
 
 	go healthCheck(healthInterval)

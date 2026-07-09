@@ -34,13 +34,17 @@ func lb(w http.ResponseWriter, r *http.Request) {
 	if nextPeer != nil {
 		// increasing request served
 		atomic.AddUint64(&nextPeer.Stats.RequestsServed, 1)
+		RequestsTotal.Inc()
 		// increasing active connection
 		atomic.AddInt64(&nextPeer.Stats.ActiveConnection, 1)
+		ActiveConnections.Inc()
 		// defer pushes the code into the stack and executes at the last
 		defer atomic.AddInt64(&nextPeer.Stats.ActiveConnection, -1)
+		defer ActiveConnections.Dec()
 		start := time.Now()
 		nextPeer.reverseproxy.ServeHTTP(w, r)
 		latency := time.Since(start)
+		RequestLatency.Observe(latency.Seconds())
 		nextPeer.Stats.mux.Lock()
 		nextPeer.Stats.TotalLatency = nextPeer.Stats.TotalLatency + latency
 		nextPeer.Stats.mux.Unlock()
