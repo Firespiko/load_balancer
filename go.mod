@@ -1,7 +1,5 @@
-module load_balancer/main
+module load_balancer
 
 go 1.25.6
 
-require ( // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
-)
+require gopkg.in/yaml.v3 v3.0.1

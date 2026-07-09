@@ -1,0 +1,51 @@
+package main
+
+import (
+	"log"
+	"net/http"
+	"sync/atomic"
+	"time"
+)
+
+func GetRetryFromContext(r *http.Request) int {
+	if retry, ok := r.Context().Value(Retry).(int); ok {
+		return retry
+	}
+	return 0
+}
+
+func GetAttemptsFromContext(r *http.Request) int {
+	if attempts, ok := r.Context().Value(Attempts).(int); ok {
+		return attempts
+	}
+	return 0
+}
+
+func lb(w http.ResponseWriter, r *http.Request) {
+	attempts := GetAttemptsFromContext(r)
+	if attempts > 3 {
+		log.Printf("%(%s) Manimu number of Attempts Exceeded\n", r.RemoteAddr, r.URL.Path)
+		http.Error(w, "Service not Available", http.StatusServiceUnavailable)
+		return
+	}
+
+	nextPeer := serverPool.GetNextPeer()
+
+	if nextPeer != nil {
+		// increasing request served
+		atomic.AddUint64(&nextPeer.Stats.RequestsServed, 1)
+		// increasing active connection
+		atomic.AddInt64(&nextPeer.Stats.ActiveConnection, 1)
+		// defer pushes the code into the stack and executes at the last
+		defer atomic.AddInt64(&nextPeer.Stats.ActiveConnection, -1)
+		start := time.Now()
+		nextPeer.reverseproxy.ServeHTTP(w, r)
+		latency := time.Since(start)
+		nextPeer.Stats.mux.Lock()
+		nextPeer.Stats.TotalLatency = nextPeer.Stats.TotalLatency + latency
+		nextPeer.Stats.mux.Unlock()
+		return
+	}
+	http.Error(w, "Service is not available at the moment", http.StatusServiceUnavailable)
+
+}
