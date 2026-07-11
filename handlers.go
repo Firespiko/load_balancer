@@ -1,11 +1,61 @@
 package main
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
 	"sync/atomic"
 	"time"
 )
+
+func BackendsHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+
+	case http.MethodGet:
+		configs := serverPool.ListBackends()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(configs)
+
+	case http.MethodPost:
+		var cfg BackendConfig
+		if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+			http.Error(
+				w,
+				err.Error(),
+				http.StatusBadRequest,
+			)
+		}
+		serverPool.AddBackend(cfg)
+		w.WriteHeader(http.StatusCreated)
+
+	case http.MethodDelete:
+
+		url := r.URL.Query().Get("url")
+
+		if url == "" {
+
+			http.Error(
+				w,
+				"Missing url parameter",
+				http.StatusBadRequest,
+			)
+
+			return
+		}
+
+		serverPool.RemoveBackend(url)
+
+		w.WriteHeader(http.StatusNoContent)
+
+	default:
+		http.Error(
+			w,
+			"Method Not Allowed",
+			http.StatusMethodNotAllowed,
+		)
+	}
+
+}
 
 func GetRetryFromContext(r *http.Request) int {
 	if retry, ok := r.Context().Value(Retry).(int); ok {

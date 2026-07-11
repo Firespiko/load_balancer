@@ -10,7 +10,10 @@ import (
 	"time"
 )
 
-func addBackend(cfg BackendConfig) {
+func (s *ServerPool) AddBackend(cfg BackendConfig) {
+	s.mux.Lock()
+	defer s.mux.Unlock()
+
 	serverURL, err := url.Parse(cfg.Url)
 	if err != nil {
 		log.Fatal(err)
@@ -35,8 +38,10 @@ func addBackend(cfg BackendConfig) {
 
 		retries := GetRetryFromContext(request)
 		if retries < 3 {
+
+			delay := 10 * time.Millisecond * time.Duration(1<<retries)
 			select {
-			case <-time.After(10 * time.Millisecond):
+			case <-time.After(delay):
 				ctx := context.WithValue(request.Context(), Retry, retries+1)
 				rp.ServeHTTP(writer, request.WithContext(ctx))
 			}
@@ -56,7 +61,7 @@ func addBackend(cfg BackendConfig) {
 		lb(writer, request.WithContext(ctx))
 	}
 
-	serverPool.AddBackend(backend)
+	serverPool.registerBackend(backend)
 
 	log.Printf("Configured server: %s\n", serverURL)
 }

@@ -10,7 +10,7 @@ func (s *ServerPool) RandomWeighted() *Backend {
 	totalWeight := 0
 
 	for _, backend := range s.backends {
-		if backend.IsAlive() {
+		if backend.IsAvailable() {
 			totalWeight += backend.Weight
 		}
 	}
@@ -24,7 +24,7 @@ func (s *ServerPool) RandomWeighted() *Backend {
 	sum := 0
 
 	for _, backend := range s.backends {
-		if !backend.IsAlive() {
+		if !backend.IsAvailable() {
 			continue
 		}
 

@@ -3,22 +3,70 @@ package main
 import (
 	"log"
 	"net/url"
+	"sync"
 	"sync/atomic"
 )
 
 type ServerPool struct {
+	mux              sync.RWMutex
 	backends         []*Backend
 	weightedBackends []*Backend
 	current          uint64
 	Scheduler        Scheduler
 }
 
-func (s *ServerPool) AddBackend(backend *Backend) {
+func (s *ServerPool) registerBackend(backend *Backend) {
 	s.backends = append(s.backends, backend)
 
 	for i := 0; i < backend.Weight; i++ {
 		s.weightedBackends = append(s.weightedBackends, backend)
 	}
+}
+
+func (s *ServerPool) RemoveBackend(rawurl string) {
+	s.mux.Lock()
+	defer s.mux.Unlock()
+
+	filtered := make([]*Backend, 0)
+
+	for _, backend := range s.backends {
+		if backend.URL.String() == rawurl {
+			continue
+		}
+
+		filtered = append(filtered, backend)
+	}
+
+	s.backends = filtered
+	s.rebuildWeightedBackends()
+}
+
+func (s *ServerPool) ListBackends() []BackendConfig {
+	s.mux.RLock()
+	defer s.mux.RUnlock()
+
+	configs := make([]BackendConfig, 0, len(s.backends))
+
+	for _, backend := range s.backends {
+		configs = append(configs, BackendConfig{
+			Url:        backend.URL.String(),
+			Weight:     backend.Weight,
+			HealthPath: "/health",
+		})
+	}
+	return configs
+
+}
+
+func (s *ServerPool) rebuildWeightedBackends() {
+	s.weightedBackends = nil
+
+	for _, backend := range s.backends {
+		for i := 0; i < backend.Weight; i++ {
+			s.weightedBackends = append(s.weightedBackends, backend)
+		}
+	}
+
 }
 
 func (s *ServerPool) MarkBackendStatus(backendUrl *url.URL, alive bool) {

@@ -22,7 +22,7 @@ func (s *ServerPool) IpHash(r *http.Request) *Backend {
 
 		idx := i % len(s.backends)
 
-		if s.backends[idx].IsAlive() {
+		if s.backends[idx].IsAvailable() {
 			return s.backends[idx]
 		}
 	}

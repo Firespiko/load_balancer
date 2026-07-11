@@ -25,6 +25,7 @@ type Backend struct {
 	FailureCount    int
 	CircuitState    CircuitState
 	LastFailureTime time.Time
+	Maintenance     bool
 }
 
 func (b *Backend) setAlive(alive bool) {
@@ -33,9 +34,10 @@ func (b *Backend) setAlive(alive bool) {
 	b.mux.Unlock()
 }
 
-func (b *Backend) IsAlive() (alive bool) {
+func (b *Backend) IsAvailable() bool {
+
 	b.mux.RLock()
-	alive = b.Alive
-	b.mux.RUnlock()
-	return alive
+	defer b.mux.RUnlock()
+
+	return b.Alive && !b.Maintenance
 }

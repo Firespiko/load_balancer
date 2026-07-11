@@ -10,7 +10,7 @@ func (s *ServerPool) LeastConnections() *Backend {
 	var minConnections int64
 
 	for _, backend := range s.backends {
-		if !backend.IsAlive() {
+		if !backend.IsAvailable() {
 			continue
 		}
 

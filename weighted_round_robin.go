@@ -24,7 +24,7 @@ func (s *ServerPool) WeightedRoundRobin() *Backend {
 	for i := next; i < l; i++ {
 		idx := i % (len(s.weightedBackends))
 		// the above idx stores the current backend it is modded since if we start from 2 out of 4 and complete till 4 and i becomes 5 then we need it to point to first backend
-		if s.weightedBackends[idx].IsAlive() {
+		if s.weightedBackends[idx].IsAvailable() {
 			if i != next {
 				atomic.StoreUint64(&s.current, uint64(idx))
 			}

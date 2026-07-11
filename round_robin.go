@@ -13,7 +13,7 @@ func (s *ServerPool) RoundRobin() *Backend {
 	for i := next; i < l; i++ {
 		idx := i % len(s.backends)
 
-		if s.backends[idx].IsAlive() {
+		if s.backends[idx].IsAvailable() {
 			if i != next {
 				atomic.StoreUint64(&s.current, uint64(idx))
 			}

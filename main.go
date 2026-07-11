@@ -50,7 +50,7 @@ func main() {
 
 		for _, backendCfg := range config.Backends {
 
-			addBackend(backendCfg)
+			serverPool.AddBackend(backendCfg)
 		}
 
 	} else {
@@ -64,7 +64,7 @@ func main() {
 
 		for _, tok := range tokens {
 
-			addBackend(BackendConfig{
+			serverPool.AddBackend(BackendConfig{
 				Url:    tok,
 				Weight: 1,
 			})
