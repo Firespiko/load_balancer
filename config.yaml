@@ -4,6 +4,8 @@ health_interval: 20s
 
 algorithm: round_robin
 
+request_timeout: 5s
+
 backends:
   - url: https://localhost:8001
     weight: 2

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -8,11 +9,17 @@ import (
 	"time"
 )
 
+type MaintenanceRequest struct {
+	URL         string `json:"url"`
+	Maintenance bool   `json:"maintenance"`
+}
+
 func BackendsHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 
 	case http.MethodGet:
 		configs := serverPool.ListBackends()
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(configs)
 
@@ -57,6 +64,34 @@ func BackendsHandler(w http.ResponseWriter, r *http.Request) {
 
 }
 
+func MaintenanceHandler(w http.ResponseWriter, r *http.Request) {
+
+	if r.Method != http.MethodPut {
+		http.Error(
+			w,
+			"Method not allowed",
+			http.StatusMethodNotAllowed,
+		)
+		return
+	}
+
+	var req MaintenanceRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(
+			w,
+			err.Error(),
+			http.StatusBadRequest,
+		)
+		return
+	}
+
+	serverPool.SetMaintenance(
+		req.URL,
+		req.Maintenance,
+	)
+	w.WriteHeader(http.StatusOK)
+}
+
 func GetRetryFromContext(r *http.Request) int {
 	if retry, ok := r.Context().Value(Retry).(int); ok {
 		return retry
@@ -91,8 +126,14 @@ func lb(w http.ResponseWriter, r *http.Request) {
 		// defer pushes the code into the stack and executes at the last
 		defer atomic.AddInt64(&nextPeer.Stats.ActiveConnection, -1)
 		defer ActiveConnections.Dec()
+		ctx, cancel := context.WithTimeout(
+			r.Context(),
+			serverPool.RequestTimeout,
+		)
+
+		defer cancel()
 		start := time.Now()
-		nextPeer.reverseproxy.ServeHTTP(w, r)
+		nextPeer.reverseproxy.ServeHTTP(w, r.WithContext(ctx))
 		latency := time.Since(start)
 		RequestLatency.Observe(latency.Seconds())
 		nextPeer.Stats.mux.Lock()

@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 type ServerPool struct {
@@ -13,6 +14,7 @@ type ServerPool struct {
 	weightedBackends []*Backend
 	current          uint64
 	Scheduler        Scheduler
+	RequestTimeout   time.Duration
 }
 
 func (s *ServerPool) registerBackend(backend *Backend) {
@@ -77,6 +79,25 @@ func (s *ServerPool) MarkBackendStatus(backendUrl *url.URL, alive bool) {
 		}
 	}
 
+}
+
+func (s *ServerPool) SetMaintenance(
+	url string,
+	maintenance bool,
+) {
+
+	s.mux.Lock()
+	defer s.mux.Unlock()
+
+	for _, backend := range s.backends {
+
+		if backend.URL.String() == url {
+
+			backend.SetMaintenance(maintenance)
+
+			return
+		}
+	}
 }
 
 func (s *ServerPool) HealthCheck() {

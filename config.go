@@ -20,6 +20,7 @@ type Config struct {
 	HealthInterval time.Duration   `yaml:"health_interval"`
 	Algorithm      string          `yaml:"algorithm"`
 	Backends       []BackendConfig `yaml:"backends"`
+	RequestTimeout time.Duration   `yaml:"request_timeout"`
 }
 
 func LoadConfig(path string) (*Config, error) {

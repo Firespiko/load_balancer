@@ -5,6 +5,10 @@ const (
 	Retry
 )
 
+type contextKey string
+
+const BackendKey contextKey = "backend"
+
 type Algorithm string
 
 const (

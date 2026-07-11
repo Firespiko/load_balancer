@@ -34,6 +34,13 @@ func (b *Backend) setAlive(alive bool) {
 	b.mux.Unlock()
 }
 
+func (b *Backend) SetMaintenance(maintenance bool) {
+	b.mux.Lock()
+	defer b.mux.Unlock()
+
+	b.Maintenance = maintenance
+}
+
 func (b *Backend) IsAvailable() bool {
 
 	b.mux.RLock()

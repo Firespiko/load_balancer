@@ -23,10 +23,12 @@ func main() {
 	var port int
 	var healthInterval time.Duration
 	var algorithm string
+	var requestTimeout time.Duration
 
 	flag.StringVar(&configPath, "config", "", "Path to config file")
 	flag.StringVar(&algorithm, "algorithm", "round_robin", "Choose the algorithm")
 	flag.StringVar(&serverList, "backends", "", "Load balanced backends")
+	flag.DurationVar(&requestTimeout, "timeout", 5*time.Second, "Request for Timeout")
 	flag.IntVar(&port, "port", 3030, "Port to serve")
 	flag.DurationVar(
 		&healthInterval,
@@ -72,9 +74,10 @@ func main() {
 
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", lb)
-	mux.Handle("/metrics", promhttp.Handler())
-	mux.HandleFunc("/backends", BackendsHandler)
+	mux.Handle("/", LoggingMiddleware(http.HandlerFunc(lb)))
+	mux.Handle("/metrics", LoggingMiddleware(promhttp.Handler()))
+	mux.Handle("/backends", LoggingMiddleware(http.HandlerFunc(BackendsHandler)))
+	mux.Handle("/backends/maintenance", LoggingMiddleware(http.HandlerFunc(MaintenanceHandler)))
 
 	server := http.Server{
 		Addr:    fmt.Sprintf(":%d", port),
