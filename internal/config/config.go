@@ -10,9 +10,10 @@ import (
 )
 
 type BackendConfig struct {
-	Url        string `yaml:"url"`
-	Weight     int    `yaml:"weight"`
-	HealthPath string `yaml:"health_path"`
+	Url         string `yaml:"url"`
+	Weight      int    `yaml:"weight"`
+	HealthPath  string `yaml:"health_path"`
+	Maintenance bool
 }
 
 type Config struct {

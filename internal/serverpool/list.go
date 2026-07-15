@@ -10,9 +10,10 @@ func (s *ServerPool) ListBackends() []config.BackendConfig {
 
 	for _, backend := range s.backends {
 		configs = append(configs, config.BackendConfig{
-			Url:        backend.URL.String(),
-			Weight:     backend.Weight,
-			HealthPath: "/health",
+			Url:         backend.URL.String(),
+			Weight:      backend.Weight,
+			HealthPath:  "/health",
+			Maintenance: backend.Maintenance,
 		})
 	}
 	return configs
