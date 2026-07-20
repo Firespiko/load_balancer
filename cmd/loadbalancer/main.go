@@ -52,6 +52,7 @@ func main() {
 		port = int(config.Port)
 		healthInterval = config.HealthInterval
 		serverPool.AlgorithmAssigner(config.Algorithm)
+		serverPool.RequestTimeout = config.RequestTimeout
 
 		for _, backendCfg := range config.Backends {
 
@@ -65,6 +66,7 @@ func main() {
 		}
 
 		tokens := strings.Split(serverList, ",")
+		serverPool.RequestTimeout = requestTimeout
 		serverPool.AlgorithmAssigner(algorithm)
 
 		for _, tok := range tokens {

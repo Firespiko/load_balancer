@@ -20,6 +20,15 @@ func (h *Handler) ProxyHandler(w http.ResponseWriter, r *http.Request) {
 
 	nextPeer := h.Pool.GetNextPeer(r)
 
+	if nextPeer == nil {
+		http.Error(
+			w,
+			"Service is not available at the moment",
+			http.StatusServiceUnavailable,
+		)
+		return
+	}
+
 	nextPeer.Reverseproxy.ErrorHandler = func(writer http.ResponseWriter, request *http.Request, e error) {
 		atomic.AddUint64(&nextPeer.Stats.FailedRequests, 1)
 		metrics.FailedRequests.Inc()
